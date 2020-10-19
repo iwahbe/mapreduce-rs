@@ -6,12 +6,57 @@ mod tests {
     }
 }
 
+use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_ulong};
+use std::sync::{Mutex, MutexGuard};
 mod ccompat;
 mod threadpool;
 use ccompat::carray::CArray;
+use lazy_static::lazy_static;
+use std::cell::UnsafeCell;
 use threadpool::ThreadPool;
+
+struct GlobalEmit<K, V> {
+    keys: Mutex<UnsafeCell<HashMap<K, Vec<V>>>>,
+}
+
+// Should take key: AsRef<K> but CStr doesn't seem to implement AsRef<CString>
+impl<K: std::cmp::Eq + std::hash::Hash + std::borrow::ToOwned<Owned = K>, V> GlobalEmit<K, V> {
+    fn emit(&self, key: &K, value: V) {
+        self.keys
+            .lock()
+            .map(|c: MutexGuard<_>| unsafe { (*c).get().as_mut().unwrap() })
+            .map(|m: &mut HashMap<K, Vec<V>>| match m.get_mut(key) {
+                Some(v) => v.push(value),
+                None => {
+                    m.insert(key.to_owned(), vec![value]);
+                }
+            })
+            .unwrap()
+    }
+
+    fn new() -> GlobalEmit<K, V> {
+        GlobalEmit {
+            keys: Mutex::new(UnsafeCell::new(HashMap::new())),
+        }
+    }
+
+    fn get(&self, key: &K) -> Option<V> {
+        self.keys
+            .lock()
+            .map(|c: MutexGuard<_>| unsafe { (*c).get().as_mut().unwrap() })
+            .map(|m| match m.get_mut(key) {
+                Some(v) => v.pop(),
+                None => None,
+            })
+            .unwrap_or(None)
+    }
+}
+
+lazy_static! {
+    static ref EMITTED: GlobalEmit<CString, CString> = GlobalEmit::new();
+}
 
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
@@ -22,6 +67,12 @@ pub extern "C" fn MR_Emit(key: *const c_char, value: *const c_char) {
         unsafe { CStr::from_ptr(key) },
         unsafe { CStr::from_ptr(value) }
     );
+    unsafe {
+        EMITTED.emit(
+            &CString::from(CStr::from_ptr(value)),
+            CString::from(CStr::from_ptr(value)),
+        )
+    }
 }
 
 type Mapper = extern "C" fn(*const c_char);
@@ -91,7 +142,10 @@ pub extern "C" fn getter(key: *const c_char, partition_number: c_int) -> *const 
         unsafe { CStr::from_ptr(key) },
         partition_number
     );
-    key
+    EMITTED
+        .get(unsafe { &CString::from(CStr::from_ptr(key)) })
+        .map(|s| s.as_ptr())
+        .unwrap_or(0 as *const c_char)
 }
 
 #[allow(non_camel_case_types)]
