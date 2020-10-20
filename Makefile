@@ -1,5 +1,5 @@
 
-.PHONY = test clean cargo
+.PHONY = test clean cargo docs docs-open
 CC = clang
 OUT = mapreduce
 
@@ -55,4 +55,11 @@ ifdef CLANG_VERSION
 	@echo "Found clang: ${CLANG_VERSION}"
 else
 	@echo "Could not find clang in PATH"
+	false
 endif
+
+docs: cargo
+	cargo doc --document-private-items
+
+docs-open: docs
+	cargo doc --document-private-items --open

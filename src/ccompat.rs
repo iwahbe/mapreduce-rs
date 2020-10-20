@@ -1,6 +1,18 @@
 pub mod carray {
     #[no_mangle]
     #[repr(transparent)]
+    /// Transparent wrapper on a C array to facilitate easy indexing and
+    /// iteration.
+    ///
+    /// Does not take ownership of the memory it observes. Does not free memory.
+    ///
+    /// ```
+    /// # fn get_c_array() { 0xFFF as *cont c_int }
+    /// let base_array: *const c_int = get_c_array();
+    /// base_array[5] // Does not compile
+    /// let carray: CArray<_> = base_array.into();
+    /// carray[5] // Compiles
+    /// ```
     pub struct CArray<T> {
         head: *const T,
     }

@@ -5,6 +5,20 @@ use std::sync::Mutex;
 use std::thread;
 
 /// A que of jobs and workers to execute them.
+///
+/// A [`ThreadPool`] maintains list of workers, and keeps track of the number of
+/// queued jobs.
+///
+/// ```
+/// let pool = ThreadPool::new(3).unwrap() // thread pool has 3 workers
+///                                        // unwrap to prevent passing 0 threads
+/// pool.execute(|| println!("Task 1"));
+/// pool.execute(|| println!("Task 2"));
+/// pool.execute(|| println!("Task 3"));
+///
+/// pool.wait(1);
+/// println!("There can only be 1 thread outstanding now.");
+/// ```
 pub struct ThreadPool {
     workers: Vec<Worker>,
     sender: mpsc::Sender<Message>,
@@ -51,6 +65,10 @@ impl ThreadPool {
     }
 
     /// Runs f on the first available worker.
+    ///
+    /// Sends the closure `f` to be executed on some thread in the thread pool.
+    /// Unless `wait` is called, there is no garentee that `f` will be called
+    /// until the pool drops, after which all tasks will be finished.
     pub fn execute<F>(&self, f: F)
     where
         F: FnOnce() + Send + 'static,
@@ -61,8 +79,20 @@ impl ThreadPool {
         self.sender.send(Message::NewJob(job)).unwrap();
     }
 
-    pub fn wait(&self, max: usize) {
-        while self.count.load(Ordering::SeqCst) > max {}
+    /// Block until there are tasks queued less then or equal to `tasks` in
+    /// number.
+    ///
+    /// Simply exectues a while loop conditional on the count of tasks
+    /// remaining.
+    ///
+    /// ```
+    /// # let pool = ThreadPool::new(5).unwrap();
+    /// add_five_tasks(&pool); // there are between 0 and 5 tasks left
+    /// pool.wait(3)           // there are between 0 and 3 tasks left
+    /// pool.wait(0)           // there are tasks remaining
+    /// ```
+    pub fn wait(&self, tasks: usize) {
+        while self.count.load(Ordering::SeqCst) > tasks {}
     }
 }
 
