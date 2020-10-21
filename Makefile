@@ -10,7 +10,7 @@ CARGO_VERSION := $(shell cargo --version 2>/dev/null)
 CLANG_VERSION := $(shell clang --version 2>/dev/null | head -1)
 CURL_VERSION := $(shell curl --version   2>/dev/null | head -1)
 
-DRIVER = comp_test.c
+DRIVER = count_words.c
 
 
 build: cargo

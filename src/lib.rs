@@ -254,6 +254,7 @@ pub extern "C" fn MR_Run(
         mappers.execute(move || map(file_ptr.0));
     }
     mappers.wait(0); // wait until there are no threads
+
     let _reducers = ThreadPool::new(num_reducers as usize).unwrap();
     for (i, name) in file_names.iter_to(argc as usize).enumerate().skip(1) {
         unsafe {
