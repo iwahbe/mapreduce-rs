@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_ulong};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::{cmp::Eq, hash::Hash};
 mod ccompat;
@@ -241,6 +242,34 @@ pub extern "C" fn MR_Run(
 
     let _reducers = ThreadPool::new(num_reducers as usize).unwrap();
     // Reduce code goes here
+    
+    // Attempt to get keys from EMITTED. However it seems to map counts to number of keys with that count, not what I would expect.
+    // unsafe {
+    //     for v in EMITTED.internal.get().as_ref().iter() {
+    //         for hashm in v.iter() {
+    //             for (key, value) in &*hashm.lock().unwrap() {
+    //                 println!("key: {} value: {}", key.to_str().unwrap(), value.len());
+    //             }
+    //         }
+    //     } 
+    }
+
+    // for n in 0..num_reducers {
+    //     let reduce_key = CString::new("reduce key");
+    //     let reduce_key_ptr = Arc::new(Mutex::new(reduce_key));
+    //     let key_ptr = *reduce_key_ptr.lock().unwrap();
+    //     _reducers.execute(move|| _reduce(
+    //         key_ptr.unwrap() as *const i8,
+    //         getter as *const extern "C" fn(*const c_char, c_int) -> *const c_char, n)
+    //     );
+    // }
+    // _reducers.wait(0);
+
+
+    
+    // for k in keys.into_iter() {
+    //     println!("k: {}", k);
+    // }
 
     println!("MR_RUN called");
 }
