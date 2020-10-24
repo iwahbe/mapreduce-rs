@@ -134,3 +134,25 @@ impl Worker {
         }
     }
 }
+
+pub struct ReducePool {}
+
+impl ReducePool {
+    /// Executes each closure found in `funcs` in a thread unique to `funcs`.
+    pub fn execute<I, F>(&self, funcs: I)
+    where
+        I: Iterator<Item = F>,
+        F: FnOnce() + Send + 'static,
+    {
+        // TODO: call each func in a thread.
+    }
+    /// Wait until there are `tasks` tasks outstanding.
+    pub fn wait(&self, tasks: usize) {
+        // TODO: wait until only some tasks remaining.
+    }
+
+    /// Creates a new instance of `ReducePool`.
+    pub fn new() -> Self {
+        Self {}
+    }
+}
