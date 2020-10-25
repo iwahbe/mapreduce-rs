@@ -141,69 +141,45 @@ impl Worker {
 }
 
 pub struct ReducePool {
-    // Consider what part of your interface this is
-    // supporting.
-    count: Arc<AtomicUsize>,
-
     // Your worker threads will need to persist past calls to execute. Because
     // you need to store threads, you need to implement a drop function to
     // facilitate cleanup.
-    _workers: (),
+    workers: Vec<thread::JoinHandle<()>>,
 }
 
 impl ReducePool {
-    // All rust code should be run through a tool called rustfmt. This is the
-    // community recognized code formater. Any rust IDE (including vscode,
-    // emacs, atom...) can be set up to run rustfmt when you save. I would encourage this.
     /// Executes each closure in the `funcs` iterator in a single non-blocking thread.
     ///
     /// This means that each call to execute will generate exactly 1 thread
     /// (plus whatever the closures do).
-    pub fn execute<I, F>(&self, funcs: I)
-    // This was marked as mut, which broke the build. Make sure that your
-    // code compiles before you submit it to github. This is especially
-    // important for rust, where getting things to compile is harder then
-    // other languages (because of the static analysis pass).
+    pub fn execute<I, F>(&mut self, funcs: I)
     where
-        I: Iterator<Item = F>,
+        I: Iterator<Item = F> + Send + 'static,
         F: FnOnce() + Send + 'static,
     {
-        let mut count = 0; // Because count is not used in the threads
-                           // themselves, it can just be a usize.
-
-        // Call each func in a thread.
-        let mut children = Vec::new(); // This vs vec![] is just style, but I
-                                       // like it better because the interface
-                                       // is consistant with all containers.
-        for f in funcs {
-            // We want each thread to handle it's own iterator. That would
-            // result in 1 thread for each call to execute, which is what we
-            // want. This results in one thread for each key in each iterable.
-            children.push(thread::spawn(|| f()));
-            self.count.fetch_add(1, Ordering::SeqCst);
-            count += 1;
-        }
-
-        for t in children {
-            // We don't want to join our threads, as that prevents us from
-            // spawning the next thread until this thread is done.
-            let _ = t.join();
-            self.count.fetch_sub(1, Ordering::SeqCst);
-            count -= 1;
-        }
-        assert_eq!(count, 0); // On the other hand, you don't do anything with
-                              // count, because the entire process happens synchronously.
-    }
-    /// Wait until there are `tasks` tasks outstanding.
-    pub fn wait(&self, tasks: usize) {
-        while self.count.load(Ordering::SeqCst) > tasks {}
+        self.workers.push(thread::spawn(|| {
+            for func in funcs {
+                func();
+            }
+        }));
     }
 
     /// Creates a new instance of `ReducePool`.
     pub fn new() -> Self {
         Self {
-            count: Arc::new(AtomicUsize::new(0)),
-            _workers: (),
+            workers: Vec::new(),
+        }
+    }
+
+    // Join ReducePool's workers by dropping them
+    pub fn join(&mut self) {
+        self.drop();
+    }
+
+    // Drain the vec while iterating, so that when the vector is dropped, since it is empty, it won't drop the elements.
+    pub fn drop(&mut self) {
+        for worker in self.workers.drain(..) {
+            worker.join().unwrap();
         }
     }
 }

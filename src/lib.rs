@@ -262,11 +262,11 @@ pub extern "C" fn MR_Run(
     mappers.join(); // Join all threads
 
     // Where ReducePool is a threadpool that will run reducer(key, getter, partition(key))
-    let reduce_pool = ReducePool::new();
+    let mut reduce_pool = ReducePool::new();
     for (i, keys) in (0..num_mappers).map(|i| (i, EMITTED.keys(i as usize))) {
         reduce_pool.execute(keys.map(move |k| move || reduce(k.as_ptr(), getter as _, i)));
     }
-    reduce_pool.wait(0);
+    reduce_pool.join();
 
     println!("MR_RUN called");
 }
