@@ -259,7 +259,7 @@ pub extern "C" fn MR_Run(
         let file_ptr = ThreadSafe(*name);
         mappers.execute(move || map(file_ptr.0));
     }
-    mappers.wait(0); // wait until there are no threads
+    mappers.join(); // Join all threads
 
     // Where ReducePool is a threadpool that will run reducer(key, getter, partition(key))
     let reduce_pool = ReducePool::new();
