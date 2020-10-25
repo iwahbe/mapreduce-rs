@@ -3,6 +3,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
+use std::time;
 
 /// A que of jobs and workers to execute them.
 ///
@@ -135,24 +136,37 @@ impl Worker {
     }
 }
 
-pub struct ReducePool {}
+pub struct ReducePool {
+    count : Arc<AtomicUsize>,
+}
 
 impl ReducePool {
     /// Executes each closure found in `funcs` in a thread unique to `funcs`.
-    pub fn execute<I, F>(&self, funcs: I)
+    pub fn execute<I, F>(&mut self, funcs: I)
     where
         I: Iterator<Item = F>,
         F: FnOnce() + Send + 'static,
     {
-        // TODO: call each func in a thread.
+        // Call each func in a thread.
+        let mut children = vec![];
+        for f in funcs {
+            children.push(thread::spawn(|| {f()}));
+            self.count.fetch_add(1, Ordering::SeqCst);
+        }
+        
+        for t in children {
+            let _ = t.join();
+            self.count.fetch_sub(1,Ordering::SeqCst);
+        }
+
     }
     /// Wait until there are `tasks` tasks outstanding.
     pub fn wait(&self, tasks: usize) {
-        // TODO: wait until only some tasks remaining.
+        while self.count.load(Ordering::SeqCst) > tasks {} 
     }
 
     /// Creates a new instance of `ReducePool`.
     pub fn new() -> Self {
-        Self {}
+        Self {count: Arc::new(AtomicUsize::new(0))}
     }
 }
