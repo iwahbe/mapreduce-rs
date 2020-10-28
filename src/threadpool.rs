@@ -172,12 +172,14 @@ impl ReducePool {
     }
 
     // Join ReducePool's workers by dropping them
-    pub fn join(&mut self) {
-        self.drop();
+    pub fn join(self) {
+        drop(self);
     }
+}
 
+impl Drop for ReducePool {
     // Drain the vec while iterating, so that when the vector is dropped, since it is empty, it won't drop the elements.
-    pub fn drop(&mut self) {
+    fn drop(&mut self) {
         for worker in self.workers.drain(..) {
             worker.join().unwrap();
         }
