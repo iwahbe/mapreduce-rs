@@ -91,8 +91,13 @@ impl ThreadPool {
     /// pool.wait(3)           // there are between 0 and 3 tasks left
     /// pool.wait(0)           // there are tasks remaining
     /// ```
+    #[allow(dead_code)]
     pub fn wait(&self, tasks: usize) {
         while self.count.load(Ordering::SeqCst) > tasks {}
+    }
+
+    pub fn join(self) {
+        drop(self)
     }
 }
 
@@ -131,6 +136,52 @@ impl Worker {
 
         Worker {
             thread: Some(thread),
+        }
+    }
+}
+
+pub struct ReducePool {
+    // Your worker threads will need to persist past calls to execute. Because
+    // you need to store threads, you need to implement a drop function to
+    // facilitate cleanup.
+    workers: Vec<thread::JoinHandle<()>>,
+}
+
+impl ReducePool {
+    /// Executes each closure in the `funcs` iterator in a single non-blocking thread.
+    ///
+    /// This means that each call to execute will generate exactly 1 thread
+    /// (plus whatever the closures do).
+    pub fn execute<I, F>(&mut self, funcs: I)
+    where
+        I: Iterator<Item = F> + Send + 'static,
+        F: FnOnce() + Send + 'static,
+    {
+        self.workers.push(thread::spawn(|| {
+            for func in funcs {
+                func();
+            }
+        }));
+    }
+
+    /// Creates a new instance of `ReducePool`.
+    pub fn new() -> Self {
+        Self {
+            workers: Vec::new(),
+        }
+    }
+
+    // Join ReducePool's workers by dropping them
+    pub fn join(self) {
+        drop(self);
+    }
+}
+
+impl Drop for ReducePool {
+    // Drain the vec while iterating, so that when the vector is dropped, since it is empty, it won't drop the elements.
+    fn drop(&mut self) {
+        for worker in self.workers.drain(..) {
+            worker.join().unwrap();
         }
     }
 }
