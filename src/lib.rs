@@ -163,11 +163,13 @@ mod global_emit {
         /// partition function `partition`. This function must be called before
         /// `emit` is called.
         pub fn setup(&self, partition: extern "C" fn(P, c_int) -> c_ulong, num_partition: usize) {
-            let mut guard = self.internal.get_mut();
-            let internal: &mut Vec<_> = &mut (*guard).as_mut().unwrap();
-            assert!(internal.len() == 0);
-            unsafe { *self.partition.get().as_mut().unwrap() = partition };
-            internal.extend((0..num_partition).map(|_| DashMap::new()));
+            {
+                let mut guard = self.internal.get_mut();
+                let internal: &mut Vec<_> = &mut (*guard).as_mut().unwrap();
+                assert!(internal.len() == 0);
+                unsafe { *self.partition.get().as_mut().unwrap() = partition };
+                internal.extend((0..num_partition).map(|_| DashMap::new()));
+            }
             self.internal.stabalize();
         }
 
@@ -305,6 +307,7 @@ pub extern "C" fn MR_Run(
         );
         return;
     }
+
     // Must be first call to EMITTED
     EMITTED.setup(partition, num_reducers.try_into().unwrap());
     let mappers = ThreadPool::new(num_mappers as usize).unwrap();
