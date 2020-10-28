@@ -17,6 +17,7 @@ mod tests {
 use std::borrow::ToOwned;
 use std::convert::TryInto;
 use std::ffi::{CStr, CString};
+use std::num::Wrapping;
 use std::os::raw::{c_char, c_int, c_ulong};
 mod ccompat;
 mod threadpool;
@@ -133,10 +134,10 @@ mod global_emit {
         pub fn emit(&self, key: &Q, value: V) {
             let inner = &self.internal;
             assert!(inner.len() > 0);
-            let partition = self.partition.get();
-            let map = &inner
-                [(unsafe { *partition })((self.pmask_key)(key), inner.len() as c_int) as usize];
+            let partition = unsafe { self.partition.get().as_ref().unwrap() };
+            let map = &inner[partition((self.pmask_key)(key), inner.len() as c_int) as usize];
             match map.get_mut(key) {
+                // TODO: evaluate if this is threadsafe
                 Some(mut v) => v.push(value),
                 None => {
                     let mut b = BinaryHeap::new();
@@ -226,12 +227,7 @@ lazy_static! {
 /// MR_Emit("Calling string", argv[0]);
 /// ```
 pub extern "C" fn MR_Emit(key: *const c_char, value: *const c_char) {
-    println!(
-        "MR_Emit called with key: {:?} and value: {:?}",
-        unsafe { CStr::from_ptr(key) },
-        unsafe { CStr::from_ptr(value) }
-    );
-    let skey = unsafe { CStr::from_ptr(value) };
+    let skey = unsafe { CStr::from_ptr(key) };
     let svalue = unsafe { CStr::from_ptr(value).to_owned() };
     EMITTED.emit(skey, svalue)
 }
@@ -324,18 +320,11 @@ pub extern "C" fn MR_Run(
         reduce_pool.execute(keys.map(move |k| move || reduce(k.as_ptr(), getter as _, i)));
     }
     reduce_pool.join();
-
-    println!("MR_RUN called");
 }
 
 #[no_mangle]
 /// Get the next `value` associated with `key` in `partition_number` or NULL if no key exists.
 pub extern "C" fn getter(key: *const c_char, partition_number: c_int) -> *const c_char {
-    println!(
-        "getter called with key: {:?}, partition_number: {}",
-        unsafe { CStr::from_ptr(key) },
-        partition_number
-    );
     EMITTED
         .get(unsafe { CStr::from_ptr(key) }, partition_number as usize)
         .map(|s| s.as_ptr())
@@ -352,7 +341,7 @@ pub extern "C" fn getter(key: *const c_char, partition_number: c_int) -> *const 
 /// MR_DefaultHashPartition("Foo", 32) // some value in [0,32)
 /// ```
 pub extern "C" fn MR_DefaultHashPartition(key: *const c_char, num_partitions: c_int) -> c_ulong {
-    let mut hash: c_ulong = 5381;
+    let mut hash: Wrapping<c_ulong> = Wrapping(5381);
     let mut c: c_char;
     let mut offset = 0;
     while {
@@ -361,7 +350,7 @@ pub extern "C" fn MR_DefaultHashPartition(key: *const c_char, num_partitions: c_
     } != '\0' as c_char
     {
         offset += 1;
-        hash = hash * 33 + (c as c_ulong);
+        hash = hash * Wrapping(33) + Wrapping(c as c_ulong);
     }
-    hash % (num_partitions as c_ulong)
+    hash.0 % (num_partitions as c_ulong)
 }
