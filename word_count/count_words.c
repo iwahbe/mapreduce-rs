@@ -1,4 +1,4 @@
-#include "mapreduce.h"
+#include "../mapreduce.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,5 +29,12 @@ void Reduce(char *key, Getter get_next, int partition_number) {
 }
 
 int main(int argc, char *argv[]) {
-  MR_Run(argc, argv, Map, 10, Reduce, 10, MR_DefaultHashPartition);
+  printf("argc %d\n", argc);
+  assert(argc > 3);
+  int num_map, num_part;
+  assert(num_map = atoi(argv[1]));
+  assert(num_part = atoi(argv[2]));
+
+  MR_Run(argc - 2, argv + 2, Map, num_map, Reduce, num_part,
+         MR_DefaultHashPartition);
 }

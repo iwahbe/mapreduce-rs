@@ -110,7 +110,7 @@ mod global_emit {
         K: Eq + Hash + Borrow<Q>,
         Q: Hash + Eq + ?Sized + ToOwned<Owned = K>,
     {
-        internal: StableMutex<Vec<DashMap<K, BinaryHeap<V>>>>,
+        internal: StableMutex<Vec<Mutex<DashMap<K, Mutex<BinaryHeap<V>>>>>>,
         partition: UnsafeCell<extern "C" fn(P, c_int) -> c_ulong>,
         pmask_key: &'static (dyn Fn(&Q) -> P),
     }
@@ -135,16 +135,23 @@ mod global_emit {
             let inner = &self.internal;
             assert!(inner.len() > 0);
             let partition = unsafe { self.partition.get().as_ref().unwrap() };
-            let map = &inner[partition((self.pmask_key)(key), inner.len() as c_int) as usize];
-            match map.get_mut(key) {
+            let map = &inner[partition((self.pmask_key)(key), inner.len() as c_int) as usize]
+                .lock()
+                .unwrap();
+            match map.get(key) {
                 // TODO: evaluate if this is threadsafe
-                Some(mut v) => v.push(value),
+                // Stratigy: lock binaryHeaps behind a mutex.
+                // This seams to do nothing, but there is still a problem.
+                // NOTE: See if this is necessary after finding the next bug.
+                Some(v) => v.lock().map(|mut m| m.push(value)).unwrap(),
                 None => {
+                    // NOTE: There seems to be issues with having this be
+                    // unprotected.
                     let mut b = BinaryHeap::new();
                     b.push(value);
-                    map.insert(key.to_owned(), b);
+                    map.insert(key.to_owned(), Mutex::new(b));
                 }
-            }
+            };
         }
 
         /// Allocates an empty GlobalEmit structure with keys of type K and values
@@ -169,7 +176,7 @@ mod global_emit {
                 let internal: &mut Vec<_> = &mut (*guard).as_mut().unwrap();
                 assert!(internal.len() == 0);
                 unsafe { *self.partition.get().as_mut().unwrap() = partition };
-                internal.extend((0..num_partition).map(|_| DashMap::new()));
+                internal.extend((0..num_partition).map(|_| Mutex::new(DashMap::new())));
             }
             self.internal.stabalize();
         }
@@ -177,11 +184,12 @@ mod global_emit {
         /// Recieve the next value associated with key from the global emitter, or None if none is available.
         pub fn get(&self, key: &Q, partition_num: usize) -> Option<V> {
             let internal = &self.internal;
-            let map = &internal[partition_num];
-            match map.get_mut(key) {
-                Some(mut v) => v.pop(),
+            let map = &internal[partition_num].lock().unwrap();
+            let x = match map.get(key) {
+                Some(m) => m.lock().map(|mut v| v.pop()).unwrap(),
                 None => None,
-            }
+            };
+            x
         }
 
         /// Returns an iterator of all keys in the given `partition`.
@@ -197,7 +205,9 @@ mod global_emit {
         pub fn keys(&self, partition: usize) -> impl Iterator<Item = K> {
             let part = &self.internal[partition];
             let mut v: Vec<_> = Vec::with_capacity(self.internal.len());
-            part.iter()
+            part.lock()
+                .unwrap()
+                .iter()
                 .map(|m| m.key().borrow().to_owned())
                 .for_each(|k| v.push(k));
             v.sort();
@@ -316,7 +326,7 @@ pub extern "C" fn MR_Run(
 
     // Where ReducePool is a threadpool that will run reducer(key, getter, partition(key))
     let mut reduce_pool = ReducePool::new();
-    for (i, keys) in (0..num_mappers).map(|i| (i, EMITTED.keys(i as usize))) {
+    for (i, keys) in (0..num_reducers).map(|i| (i, EMITTED.keys(i as usize))) {
         reduce_pool.execute(keys.map(move |k| move || reduce(k.as_ptr(), getter as _, i)));
     }
     reduce_pool.join();

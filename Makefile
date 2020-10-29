@@ -10,18 +10,39 @@ CARGO_VERSION := $(shell cargo --version 2>/dev/null)
 CLANG_VERSION := $(shell clang --version 2>/dev/null | head -1)
 CURL_VERSION := $(shell curl --version   2>/dev/null | head -1)
 
-DRIVER = count_words.c
+DRIVER = comp_test.c
 
 
 build: cargo
 	cargo build
 	${CC} ${DRIVER} ${RUST_DEBUG_LOC} -o ${OUT}
 
+wordcount: cargo
+	cargo build --release
+	${CC} word_count/count_words.c ${RUST_RELEASE_LOC} -o word_count/wordcount
+
+define wordcount_test
+	@echo "Testing word_count $(1) $(2)"
+	@cd word_count && \
+	./wordcount $(1) $(2) lorum_ipsum.txt lorum_ipsum.txt count_words.c |\
+	awk '{print $$2}' | sort -n  > expected$(1)$(2).txt && \
+	diff expected$(1)$(2).txt result.txt
+endef
+
+test_wordcount: wordcount
+	$(call wordcount_test,1,1)
+	$(call wordcount_test,5,1)
+	$(call wordcount_test,1,5)
+	$(call wordcount_test,5,5)
+	$(call wordcount_test,10,10)
+	@echo "All wordcount tests passed"
+
+
 release: cargo
 	cargo build --release
 	${CC} ${DRIVER} ${RUST_RELEASE_LOC} -o ${OUT}
 
-test: build
+test: build test_wordcount
 	cargo test
 
 clean: cargo
