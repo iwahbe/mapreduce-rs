@@ -24,12 +24,13 @@ wordcount: cargo
 define wordcount_test
 	@echo "Testing word_count $(1) $(2)"
 	@cd word_count && \
-	./wordcount $(1) $(2) lorum_ipsum.txt lorum_ipsum.txt count_words.c |\
-	awk '{print $$2}' | sort -n  > expected$(1)$(2).txt && \
+	./wordcount $(1) $(2) lorum_ipsum.txt lorum_ipsum.txt count_words.c \
+	| sort -n  > expected$(1)$(2).txt && \
 	diff expected$(1)$(2).txt result.txt
 endef
 
 test_wordcount: wordcount
+	@echo "wordcount:"
 	$(call wordcount_test,1,1)
 	$(call wordcount_test,5,1)
 	$(call wordcount_test,1,5)
