@@ -77,7 +77,6 @@ mod global_emit {
     impl<T> std::ops::Deref for StableMutex<T> {
         type Target = T;
         fn deref(&self) -> &Self::Target {
-            println!("getting here");
             self.get_ref()
         }
     }
