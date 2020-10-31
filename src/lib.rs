@@ -35,18 +35,24 @@ mod global_emit {
     use std::sync::{Mutex, MutexGuard, RwLock};
     use std::{cmp::Eq, hash::Hash};
 
+    /// A Mutex protected value that can then be stabalized, yielding the the
+    /// inner value. This is a useful construct almost exclusivly when statically
+    /// alocating something with `lazy_static!`.
     enum StableMutex<T> {
         Unstable { inner: Mutex<Option<Box<T>>> },
         Stable { inner: Box<T> },
     }
 
     impl<T> StableMutex<T> {
+        /// Wrapps the `inner` value in a `StableMutex`
         fn new(inner: T) -> Self {
             Self::Unstable {
                 inner: Mutex::new(Some(Box::new(inner))),
             }
         }
 
+        /// Stabalize the StableMutex. Removes the cost of aquiring the mutex.
+        /// Calling `get_mut` or `stabalize` will now panic. You have been warned.
         fn stabalize(&self) {
             if let StableMutex::Unstable { inner } = self {
                 let new = inner.lock().unwrap().take().unwrap();
@@ -54,9 +60,12 @@ mod global_emit {
                     *(self as *const _ as *mut _) = Self::Stable { inner: new };
                 }
             } else {
-                panic!()
+                panic!("Cannot stabalize an already stable StableMutex.")
             }
         }
+
+        /// Get a mutable reference to a yet unstabalized StableMutex. If the
+        /// mutex has already been stabalized, then will panic.
         fn get_mut(&self) -> MutexGuard<Option<Box<T>>> {
             if let Self::Unstable { inner } = self {
                 inner.lock().unwrap()
@@ -65,6 +74,8 @@ mod global_emit {
             }
         }
 
+        /// Get a refernce to the interior value of the stableized StableMutex.
+        /// If the mutex has not yet been stabalized, panic.
         fn get_ref(&self) -> &T {
             if let Self::Stable { inner } = self {
                 inner
@@ -73,6 +84,7 @@ mod global_emit {
             }
         }
 
+        /// Returns if the mutex has been stabalized.
         #[allow(dead_code)]
         fn is_stable(&self) -> bool {
             match self {
@@ -116,6 +128,8 @@ mod global_emit {
             }
         }
 
+        /// Inserts a `value` into the `BinaryHeap` associated with the `key`
+        /// given. This opperation is threadsafe.
         fn insert(&self, key: &Q, value: V) {
             let map_read = self.internal.read().unwrap(); // Allows inserting into a
                                                           // binary heap, but not creating a new heap.
@@ -146,6 +160,8 @@ mod global_emit {
             // map_read has droped by this point. It might have been earlier.
         }
 
+        /// Pop a value associated with `key`. This value will be returned in
+        /// order.
         fn get(&self, key: &Q) -> Option<V> {
             self.internal
                 .read()
@@ -155,6 +171,7 @@ mod global_emit {
                 .unwrap_or(None)
         }
 
+        /// A vector of all keys currently in use.
         fn keys(&self) -> Vec<K> {
             let map: &DashMap<K, _> = &*self.internal.read().unwrap();
             let mut v: Vec<_> = Vec::with_capacity(map.len());
