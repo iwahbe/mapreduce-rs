@@ -5,6 +5,59 @@
 //! [`Getter`](Getter) and [`MR_Emit`](MR_Emit) do not take any arguments for
 //! managing state, this necessitates a mutable global [`EMITTED`](EMITTED)
 //! object.
+//!
+//!
+
+#[cfg(test)]
+#[ctor::ctor]
+fn init() {
+    EMITTED.setup(MR_DefaultHashPartition, 1);
+}
+mod tests {
+
+    use super::*;
+
+    #[test]
+
+    fn test_emit_single_thread() {
+        let key_as_c_str = CString::new("test_key").unwrap();
+        let key: *const c_char = key_as_c_str.as_ptr() as *const c_char;
+        let val_as_c_str = CString::new("1").unwrap();
+        let val: *const c_char = val_as_c_str.as_ptr() as *const c_char;
+
+        MR_Emit(key, val);
+
+        let got = EMITTED.get(&key_as_c_str, 0);
+        assert_eq!(got.unwrap(), std::ffi::CString::new("1").unwrap());
+    }
+
+    #[test]
+
+    fn test_emit_multi_threaded() {
+        use rand::{thread_rng, Rng};
+
+        let mut rng = thread_rng();
+        let num_threads: u32 = rng.gen_range(10, 20);
+
+        for _i in 0..num_threads {
+            let _child = thread::spawn(|| {
+                let key_as_c_str = CString::new("test_key").unwrap();
+                let key: *const c_char = key_as_c_str.as_ptr() as *const c_char;
+                let val_as_c_str = CString::new("1").unwrap();
+
+                let val: *const c_char = val_as_c_str.as_ptr() as *const c_char;
+                MR_Emit(key, val)
+            });
+        }
+
+        let key_as_c_str = CString::new("test_key").unwrap();
+
+        assert_eq!(
+            EMITTED.get(&key_as_c_str, 0).unwrap(),
+            std::ffi::CString::new("1").unwrap()
+        );
+    }
+}
 
 use std::borrow::ToOwned;
 use std::convert::TryInto;
@@ -16,6 +69,7 @@ mod threadpool;
 use ccompat::carray::CArray;
 use global_emit::GlobalEmit;
 use lazy_static::lazy_static;
+use std::thread;
 use threadpool::{ReducePool, ThreadPool};
 
 mod global_emit {

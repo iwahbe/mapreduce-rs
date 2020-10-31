@@ -11,5 +11,7 @@ crate-type = ["cdylib"]      # Creates dynamic lib
 [dependencies]
 lazy_static = "1.4"
 dashmap = "3.11"
+ctor = "*"
+rand = "*"
 
 [build-dependencies]
