@@ -1,7 +1,7 @@
 
 .PHONY = test clean cargo docs docs-open
 CC = clang
-OUT = mapreduce
+OUT = comp_test
 
 RUST_DEBUG_LOC = -L./target/debug -lconcurrency_mapreduce
 RUST_RELEASE_LOC = -L./target/release -lconcurrency_mapreduce
@@ -12,13 +12,17 @@ CURL_VERSION := $(shell curl --version   2>/dev/null | head -1)
 
 DRIVER = comp_test.c
 
-
-build: cargo
-	cargo build
+link-dbg: build
 	${CC} ${DRIVER} ${RUST_DEBUG_LOC} -o ${OUT}
 
-wordcount: cargo
-	cargo build --release
+link: release
+	${CC} ${DRIVER} ${RUST_RELEASE_LOC} -o ${OUT}
+
+
+build: cargo src
+	cargo build
+
+wordcount: cargo word_count/count_words.c release
 	${CC} word_count/count_words.c ${RUST_RELEASE_LOC} -o word_count/wordcount
 
 define wordcount_test
@@ -41,7 +45,6 @@ test_wordcount: wordcount
 
 release: cargo
 	cargo build --release
-	${CC} ${DRIVER} ${RUST_RELEASE_LOC} -o ${OUT}
 
 test: build test_wordcount
 	cargo test
@@ -52,6 +55,10 @@ clean: cargo
 	@ rm *.h.gch 2>/dev/null || true
 	@ rm ${OUT} 2>/dev/null || true
 	@ rm *.ghc 2>/dev/null || true
+	@ rm word_count/expected*.txt 2>/dev/null || true
+	@ rm word_count/wordcount 2>/dev/null || true
+	@ rm comp_test 2>/dev/null || true
+	@ echo "Everything should be clean now."
 
 pre-req: cargo clang
 
