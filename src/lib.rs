@@ -410,24 +410,3 @@ pub extern "C" fn MR_DefaultHashPartition(key: *const c_char, num_partitions: c_
     }
     hash.0 % (num_partitions as c_ulong)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-
-    fn test_emit_1() {
-        EMITTED.setup(MR_DefaultHashPartition, 1);
-
-        let key_as_c_str = CString::new("test_key").unwrap();
-        let key: *const c_char = key_as_c_str.as_ptr() as *const c_char;
-        let val_as_c_str = CString::new("1").unwrap();
-        let val: *const c_char = val_as_c_str.as_ptr() as *const c_char;
-
-        MR_Emit(key, val);
-
-        let got = EMITTED.get(&key_as_c_str, 0);
-        assert_eq!(got.unwrap(), std::ffi::CString::new("1").unwrap());
-    }
-}
