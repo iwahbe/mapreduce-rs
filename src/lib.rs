@@ -15,6 +15,7 @@ fn init() {
 }
 mod tests {
 
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]
@@ -34,12 +35,9 @@ mod tests {
     #[test]
 
     fn test_emit_multi_threaded() {
-        use rand::{thread_rng, Rng};
+        use std::thread;
 
-        let mut rng = thread_rng();
-        let num_threads: u32 = rng.gen_range(10, 20);
-
-        for _i in 0..num_threads {
+        for _i in 0..15 {
             let _child = thread::spawn(|| {
                 let key_as_c_str = CString::new("test_key").unwrap();
                 let key: *const c_char = key_as_c_str.as_ptr() as *const c_char;
@@ -69,7 +67,6 @@ mod threadpool;
 use ccompat::carray::CArray;
 use global_emit::GlobalEmit;
 use lazy_static::lazy_static;
-use std::thread;
 use threadpool::{ReducePool, ThreadPool};
 
 mod global_emit {
