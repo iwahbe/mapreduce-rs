@@ -25,16 +25,16 @@ build: cargo src
 wordcount: cargo word_count/count_words.c release
 	${CC} word_count/count_words.c ${RUST_RELEASE_LOC} -o word_count/wordcount
 
-define wordcount_test
-	@echo "Testing word_count $(1) $(2)"
+define wordcount1_test
+	@echo "Testing word_count_1 $(1) $(2)"
 	@cd word_count && \
 	./wordcount $(1) $(2) lorum_ipsum.txt lorum_ipsum.txt count_words.c \
 	| sort -n  > expected$(1)$(2).txt && \
 	diff expected$(1)$(2).txt result.txt
 endef
 
-define wordcount_redundant_test
-	@echo "Testing word_count_redundant $(1) $(2)"
+define wordcount2_test
+	@echo "Testing word_count_2 $(1) $(2)"
 	@cd word_count && \
 	./wordcount $(1) $(2) redundant.txt \
 	| sort -n  > redundant_expected$(1)$(2).txt && \
@@ -43,16 +43,16 @@ endef
 
 test_wordcount: wordcount
 	@echo "wordcount:"
-	$(call wordcount_test,1,1)
-	$(call wordcount_test,5,1)
-	$(call wordcount_test,1,5)
-	$(call wordcount_test,5,5)
-	$(call wordcount_test,10,10)
-	$(call wordcount_redundant_test,1,1)
-	$(call wordcount_redundant_test,5,1)
-	$(call wordcount_redundant_test,3,3)
-	$(call wordcount_redundant_test,7,15)
-	$(call wordcount_redundant_test,20,30)
+	$(call wordcount1_test,1,1)
+	$(call wordcount1_test,5,1)
+	$(call wordcount1_test,1,5)
+	$(call wordcount1_test,5,5)
+	$(call wordcount1_test,10,10)
+	$(call wordcount2_test,1,1)
+	$(call wordcount2_test,5,1)
+	$(call wordcount2_test,3,3)
+	$(call wordcount2_test,7,15)
+	$(call wordcount2_test,20,30)
 	@echo "All wordcount tests passed"
 
 release: cargo
@@ -67,7 +67,7 @@ clean: cargo
 	@ rm *.h.gch 2>/dev/null || true
 	@ rm ${OUT} 2>/dev/null || true
 	@ rm *.ghc 2>/dev/null || true
-	@ rm word_count/expected*.txt 2>/dev/null || true
+	@ rm word_count/*expected*.txt 2>/dev/null || true
 	@ rm word_count/wordcount 2>/dev/null || true
 	@ rm comp_test 2>/dev/null || true
 	@ echo "Everything should be clean now."
