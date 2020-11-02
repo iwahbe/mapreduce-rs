@@ -5,8 +5,6 @@
 //! [`Getter`](Getter) and [`MR_Emit`](MR_Emit) do not take any arguments for
 //! managing state, this necessitates a mutable global [`EMITTED`](EMITTED)
 //! object.
-//!
-//!
 
 #[cfg(test)]
 #[ctor::ctor]
