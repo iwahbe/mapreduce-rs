@@ -33,6 +33,14 @@ define wordcount_test
 	diff expected$(1)$(2).txt result.txt
 endef
 
+define wordcount_redundant_test
+	@echo "Testing word_count_redundant $(1) $(2)"
+	@cd word_count && \
+	./wordcount $(1) $(2) redundant.txt \
+	| sort -n  > redundant_expected$(1)$(2).txt && \
+	diff redundant_expected$(1)$(2).txt redundant_result.txt
+endef
+
 test_wordcount: wordcount
 	@echo "wordcount:"
 	$(call wordcount_test,1,1)
@@ -40,8 +48,12 @@ test_wordcount: wordcount
 	$(call wordcount_test,1,5)
 	$(call wordcount_test,5,5)
 	$(call wordcount_test,10,10)
+	$(call wordcount_redundant_test,1,1)
+	$(call wordcount_redundant_test,5,1)
+	$(call wordcount_redundant_test,3,3)
+	$(call wordcount_redundant_test,7,15)
+	$(call wordcount_redundant_test,20,30)
 	@echo "All wordcount tests passed"
-
 
 release: cargo
 	cargo build --release
