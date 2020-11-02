@@ -75,21 +75,27 @@ mod global_emit {
     use std::cell::UnsafeCell;
     use std::collections::BinaryHeap;
     use std::os::raw::{c_int, c_ulong};
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::{Mutex, MutexGuard, RwLock};
     use std::{cmp::Eq, hash::Hash};
 
+    /// A Mutex protected value that can then be stabalized, yielding the the
+    /// inner value. This is a useful construct almost exclusivly when statically
+    /// alocating something with `lazy_static!`.
     enum StableMutex<T> {
         Unstable { inner: Mutex<Option<Box<T>>> },
         Stable { inner: Box<T> },
     }
 
     impl<T> StableMutex<T> {
+        /// Wrapps the `inner` value in a `StableMutex`
         fn new(inner: T) -> Self {
             Self::Unstable {
                 inner: Mutex::new(Some(Box::new(inner))),
             }
         }
 
+        /// Stabalize the StableMutex. Removes the cost of aquiring the mutex.
+        /// Calling `get_mut` or `stabalize` will now panic. You have been warned.
         fn stabalize(&self) {
             if let StableMutex::Unstable { inner } = self {
                 let new = inner.lock().unwrap().take().unwrap();
@@ -97,9 +103,12 @@ mod global_emit {
                     *(self as *const _ as *mut _) = Self::Stable { inner: new };
                 }
             } else {
-                panic!()
+                panic!("Cannot stabalize an already stable StableMutex.")
             }
         }
+
+        /// Get a mutable reference to a yet unstabalized StableMutex. If the
+        /// mutex has already been stabalized, then will panic.
         fn get_mut(&self) -> MutexGuard<Option<Box<T>>> {
             if let Self::Unstable { inner } = self {
                 inner.lock().unwrap()
@@ -108,6 +117,8 @@ mod global_emit {
             }
         }
 
+        /// Get a refernce to the interior value of the stableized StableMutex.
+        /// If the mutex has not yet been stabalized, panic.
         fn get_ref(&self) -> &T {
             if let Self::Stable { inner } = self {
                 inner
@@ -116,6 +127,7 @@ mod global_emit {
             }
         }
 
+        /// Returns if the mutex has been stabalized.
         #[allow(dead_code)]
         fn is_stable(&self) -> bool {
             match self {
@@ -133,6 +145,85 @@ mod global_emit {
     }
 
     unsafe impl<T> std::marker::Sync for StableMutex<T> where T: std::marker::Sync {}
+
+    /// DefaultDashMap is a RwLock protected DashMap that allows the threadsafe
+    /// creation of multiple value containers (backed by a BinaryHeap).
+    struct DefaultDashMap<K, V, Q>
+    where
+        Q: Hash + Eq + ?Sized + ToOwned<Owned = K>,
+        K: Eq + Hash + Borrow<Q>,
+    {
+        internal: RwLock<DashMap<K, BinaryHeap<V>>>,
+        q_bound: std::marker::PhantomData<Q>,
+    }
+
+    impl<K, V, Q> DefaultDashMap<K, V, Q>
+    where
+        Q: Hash + Eq + ?Sized + ToOwned<Owned = K>,
+        K: Eq + Hash + Borrow<Q>,
+        V: Ord,
+    {
+        /// Creates a new instance of `DefaultDashMap<K, V, Q>`
+        fn new() -> Self {
+            Self {
+                internal: RwLock::new(DashMap::new()),
+                q_bound: std::marker::PhantomData,
+            }
+        }
+
+        /// Inserts a `value` into the `BinaryHeap` associated with the `key`
+        /// given. This opperation is threadsafe.
+        fn insert(&self, key: &Q, value: V) {
+            let map_read = self.internal.read().unwrap(); // Allows inserting into a
+                                                          // binary heap, but not creating a new heap.
+            let alter_push = |map: &DashMap<K, _>, key, value| {
+                map.alter(key, |_, mut v: BinaryHeap<V>| {
+                    v.push(value);
+                    v
+                })
+            };
+            if map_read.contains_key(key) {
+                alter_push(&*map_read, key, value);
+            } else {
+                drop(map_read); // Prevent deadlock
+                let map_write = self.internal.write().unwrap(); // necessary to write a new heap.
+                if map_write.contains_key(key) {
+                    // Sometimes another thread has written a new heap by this
+                    // point, so we just add to that.
+                    alter_push(&*map_write, key, value);
+                } else {
+                    // Otherwise we write a new heap, adding our element to
+                    // that, and then insert the new heap.
+                    let mut b = BinaryHeap::new();
+                    b.push(value);
+                    map_write.insert(key.to_owned(), b);
+                }
+                // map_write drops
+            }
+            // map_read has droped by this point. It might have been earlier.
+        }
+
+        /// Pop a value associated with `key`. This value will be returned in
+        /// order.
+        fn get(&self, key: &Q) -> Option<V> {
+            self.internal
+                .read()
+                .unwrap()
+                .get_mut(key)
+                .map(|mut m| m.pop())
+                .unwrap_or(None)
+        }
+
+        /// A vector of all keys currently in use.
+        fn keys(&self) -> Vec<K> {
+            let map: &DashMap<K, _> = &*self.internal.read().unwrap();
+            let mut v: Vec<_> = Vec::with_capacity(map.len());
+            map.iter()
+                .map(|m| m.key().borrow().to_owned())
+                .for_each(|k| v.push(k));
+            v
+        }
+    }
 
     /// Encapsulates mutable global threadsafe state for a map between keys and
     /// values. There may be multiple values per key.
@@ -153,7 +244,7 @@ mod global_emit {
         K: Eq + Hash + Borrow<Q>,
         Q: Hash + Eq + ?Sized + ToOwned<Owned = K>,
     {
-        internal: StableMutex<Vec<Mutex<DashMap<K, Mutex<BinaryHeap<V>>>>>>,
+        internal: StableMutex<Vec<DefaultDashMap<K, V, Q>>>,
         partition: UnsafeCell<extern "C" fn(P, c_int) -> c_ulong>,
         pmask_key: &'static (dyn Fn(&Q) -> P),
     }
@@ -178,23 +269,8 @@ mod global_emit {
             let inner = &self.internal;
             assert!(inner.len() > 0);
             let partition = unsafe { self.partition.get().as_ref().unwrap() };
-            let map = &inner[partition((self.pmask_key)(key), inner.len() as c_int) as usize]
-                .lock()
-                .unwrap();
-            match map.get(key) {
-                // TODO: evaluate if this is threadsafe
-                // Stratigy: lock binaryHeaps behind a mutex.
-                // This seams to do nothing, but there is still a problem.
-                // NOTE: See if this is necessary after finding the next bug.
-                Some(v) => v.lock().map(|mut m| m.push(value)).unwrap(),
-                None => {
-                    // NOTE: There seems to be issues with having this be
-                    // unprotected.
-                    let mut b = BinaryHeap::new();
-                    b.push(value);
-                    map.insert(key.to_owned(), Mutex::new(b));
-                }
-            };
+            let map = &inner[partition((self.pmask_key)(key), inner.len() as c_int) as usize];
+            map.insert(key, value);
         }
 
         /// Allocates an empty GlobalEmit structure with keys of type K and values
@@ -219,7 +295,8 @@ mod global_emit {
                 let internal: &mut Vec<_> = &mut (*guard).as_mut().unwrap();
                 assert!(internal.len() == 0);
                 unsafe { *self.partition.get().as_mut().unwrap() = partition };
-                internal.extend((0..num_partition).map(|_| Mutex::new(DashMap::new())));
+                internal.extend((0..num_partition).map(|_| DefaultDashMap::new()));
+                assert!(internal.len() != 0);
             }
             self.internal.stabalize();
         }
@@ -227,12 +304,8 @@ mod global_emit {
         /// Recieve the next value associated with key from the global emitter, or None if none is available.
         pub fn get(&self, key: &Q, partition_num: usize) -> Option<V> {
             let internal = &self.internal;
-            let map = &internal[partition_num].lock().unwrap();
-            let x = match map.get(key) {
-                Some(m) => m.lock().map(|mut v| v.pop()).unwrap(),
-                None => None,
-            };
-            x
+            let map = &internal[partition_num];
+            map.get(key)
         }
 
         /// Returns an iterator of all keys in the given `partition`.
@@ -247,12 +320,7 @@ mod global_emit {
         /// Example asumes `K: Debug`.
         pub fn keys(&self, partition: usize) -> impl Iterator<Item = K> {
             let part = &self.internal[partition];
-            let mut v: Vec<_> = Vec::with_capacity(self.internal.len());
-            part.lock()
-                .unwrap()
-                .iter()
-                .map(|m| m.key().borrow().to_owned())
-                .for_each(|k| v.push(k));
+            let mut v = part.keys();
             v.sort();
             v.into_iter()
         }
