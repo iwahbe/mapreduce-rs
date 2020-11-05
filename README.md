@@ -1,9 +1,5 @@
 # Map Reduce
 
-## Installation Instructions
-
-This map reduce project was written in the Rust programming language. To install, build and test it, simply clone this repository onto your machine and run the command ```make test```. This will run the tests written in the make file, as well as the tests internal to the rust library we have written. 
-
 In 2004, engineers at Google introduced a new paradigm for large-scale
 parallel data processing known as MapReduce (see the original paper
 [here](https://static.googleusercontent.com/media/research.google.com/en//archive/mapreduce-osdi04.pdf),
@@ -14,92 +10,25 @@ machine crashes, and many other complexities common within clusters of
 machines, the developer can instead just focus on writing little bits of code
 (described below) and the infrastructure handles the rest.
 
-In this project, you'll be building a simplified version of MapReduce for just
-a single machine. While somewhat easier to build MapReduce for a single
-machine, there are still numerous challenges, mostly in building the correct
-concurrency support. Thus, you'll have to think a bit about how to build the
-MapReduce implementation, and then build it to work efficiently and correctly.
+## Installation Instructions
 
-There are three specific objectives to this assignment:
-
-- To learn about the general nature of the MapReduce paradigm.
-- To implement a correct and efficient MapReduce framework using threads and
-  related functions.
-- To gain more experience writing concurrent code.
+This map reduce project was written in Rust. To install, build and test it,
+simply clone this repository onto your machine and run the command `make test`.
+This will run the tests written in the make file, as well as the tests internal
+to the rust library we have written. If Rust is not installed, `make` will prompt
+you to install it.
 
 ## Compiling
 
 The project assumes that both `clang` and either `cargo` (the rust build tool)
 or `curl` (to install rust from) is in your path. If cargo is not found in
 `PATH`, rust should be automatically installed. If clang is not installed, best
-of luck.
+of luck. `make` is used to build the C interface, as well as run integration
+tests. Unit tests are run from within `cargo`.
 
-## Background
+## Overview
 
-To understand how to make progress on any project that involves concurrency,
-you should understand the basics of thread creation, mutual exclusion (with
-locks), and signaling/waiting (with condition variables). These are described
-in the following book chapters:
-
-- [Intro to Threads](http://pages.cs.wisc.edu/~remzi/OSTEP/threads-intro.pdf)
-- [Threads API](http://pages.cs.wisc.edu/~remzi/OSTEP/threads-api.pdf)
-- [Locks](http://pages.cs.wisc.edu/~remzi/OSTEP/threads-locks.pdf)
-- [Using Locks](http://pages.cs.wisc.edu/~remzi/OSTEP/threads-locks-usage.pdf)
-- [Condition Variables](http://pages.cs.wisc.edu/~remzi/OSTEP/threads-cv.pdf)
-
-Read these chapters carefully in order to prepare yourself for this project.
-
-## General Idea
-
-Let's now get into the exact code you'll have to build. The MapReduce
-infrastructure you will build supports the execution of user-defined `Map()`
-and `Reduce()` functions.
-
-As from the original paper: "`Map()`, written by the user, takes an input pair
-and produces a set of intermediate key/value pairs. The MapReduce library
-groups together all intermediate values associated with the same intermediate
-key K and passes them to the `Reduce()` function."
-
-"The `Reduce()` function, also written by the user, accepts an intermediate
-key K and a set of values for that key. It merges together these values to
-form a possibly smaller set of values; typically just zero or one output value
-is produced per `Reduce()` invocation. The intermediate values are supplied to
-the user's reduce function via an iterator."
-
-A classic example, written here in pseudocode, shows how to count the number
-of occurrences of each word in a set of documents:
-
-```
-map(String key, String value):
-    // key: document name
-    // value: document contents
-    for each word w in value:
-        EmitIntermediate(w, "1");
-
-reduce(String key, Iterator values):
-    // key: a word
-    // values: a list of counts
-    int result = 0;
-    for each v in values:
-        result += ParseInt(v);
-    print key, result;
-```
-
-What's fascinating about MapReduce is that so many different kinds of relevant
-computations can be mapped onto this framework. The original paper lists many
-examples, including word counting (as above), a distributed grep, a URL
-frequency access counters, a reverse web-link graph application, a term-vector
-per host analysis, and others.
-
-What's also quite interesting is how easy it is to parallelize: many mappers
-can be running at the same time, and later, many reducers can be running at
-the same time. Users don't have to worry about how to parallelize their
-application; rather, they just write `Map()` and `Reduce()` functions and the
-infrastructure does the rest.
-
-## Code Overview
-
-We give you here the
+The library is linked against the C header below.
 [`mapreduce.h`](https://github.com/remzi-arpacidusseau/ostep-projects/tree/master/concurrency-mapreduce/mapreduce.h)
 header file that specifies exactly what you must build in your MapReduce library:
 
@@ -133,20 +62,18 @@ called `map`), the number of mapper threads your library should create
 `reduce`), the number of reducers (`num_reducers`), and finally, a pointer to
 a Partition function (`partition`, described below).
 
-Thus, when a user is writing a MapReduce computation with your library, they
-will implement a Map function, implement a Reduce function, possibly implement
-a Partition function, and then call `MR_Run()`. The infrastructure will then
-create threads as appropriate and run the computation.
+Thus, when a user is writing a MapReduce computation, they implement a Map
+function, a Reduce function, possibly a Partition function, and then call
+`MR_Run()`. The infrastructure will create threads as appropriate and run the
+computation.
 
 One basic assumption is that the library will create `num_mappers` threads
 (in a thread pool) that perform the map tasks. Another is that your library
-will create `num_reducers` threads to perform the reduction tasks. Finally,
-your library will create some kind of internal data structure to pass
-keys and values from mappers to reducers; more on this below.
+will create `num_reducers` threads to perform the reduction tasks.
 
 ## Simple Example: Wordcount
 
-Here is a simple (but functional) wordcount program, written to use this
+Here is a simple (but functional) `wordcount` program, written to use this
 infrastructure:
 
 ```
@@ -247,39 +174,33 @@ with said keys) should be **sorted** in ascending key order; thus, when a
 particular reducer thread (and its associated partition) are working, the
 `Reduce()` function should be called on each key in order for that partition.
 
-## Considerations
+## Code
 
-Here are a few things to consider in your implementation:
+The project is broken up into 3 files, `ccompat.rs`, `threadpool.rs` and
+`lib.rs`.
 
-- **Thread Management**. This part is fairly straightforward. You should
-  create `num_mappers` mapping threads, and assign a file to each `Map()`
-  invocation in some manner you think is best (e.g., Round Robin,
-  Shortest-File-First, etc.). Which way might lead to best performance? You
-  should also create `num_reducers` reducer threads at some point, to work
-  on the map'd output.
+The first provides a non-owning wrapper around an array, as well as a
+convenience wrapper to get around rust's dislike of passing `*const T` between
+threads.
 
-- **Partitioning and Sorting**. Your central data structure should be
-  concurrent, allowing mappers to each put values into different
-  partitions correctly and efficiently. Once the mappers have completed, a
-  sorting phase should order the key/value-lists. Then, finally, each
-  reducer thread should start calling the user-defined `Reduce()` function
-  on the keys in sorted order per partition. You should think about what
-  type of locking is needed throughout this process for correctness.
+The second provides a `threadPool` for use by `mappers` and a `ReducePool` for
+reducers. A `ThreadPool` is exactly what you expect it to be and a `ReuducePool`
+is similar. Instead of executing a set of operations in the next available
+thread, a `ReducePool` executes a set of operations in the same thread, each
+additional set of operations spawning a new thread on which to execute.
 
-- **Memory Management**. One last concern is memory management. The
-  `MR_Emit()` function is passed a key/value pair; it is the responsibility
-  of the MR library to make copies of each of these. Then, when the entire
-  mapping and reduction is complete, it is the responsibility of the MR
-  library to free everything.
+Finally `lib.rs` provides the interface as well as the main data structure:
+`GlobalEmitter`. Because of the C header given, we needed to use global mutable
+state. This involved two main abstractions. A `StableMutex` allows us to create
+a threadsafe object that is fully mutable, then permanently lock it, and forgo
+the cost of the `Mutex`. A `DefaultDashMap` is a concurrent hash map built on
+top of the `DashMap` library, that supports the creation of complex data
+structures as map keys. In this case, we use `BinaryHeap`s, but we could in
+theory use any concurrent data structure. The `EMITTED`, once stabilized,
+acts as a statically allocated wrapper for a `DefualtDashMap`. The functions
+exposed to C, expecting `MR_Run`, are simple interfaces into `EMITTED`,
 
-## Grading
+## Citations
 
-Your code should turn in `mapreduce.c` which implements the above functions
-correctly and efficiently. It will be compiled with test applications with the
-`-Wall -Werror -pthread -O` flags; it will also be valgrinded to check for
-memory errors.
-
-Your code will first be measured for correctness, ensuring that it performs
-the maps and reductions correctly. If you pass the correctness tests, your
-code will be tested for performance; higher performance will lead to better
-scores.
+This project was complies with the ostep operating systems textbook and was
+written for Reed's CS393 Operating Systems class.

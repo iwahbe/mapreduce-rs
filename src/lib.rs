@@ -38,14 +38,14 @@ mod tests {
         let emit = GlobalEmit::new(dummy_partition, clos);
 
         emit.setup(dummy_partition, 3);
-        let emitter = Arc::new(ThreadSafe(emit));
+        let emitter = unsafe { Arc::new(ThreadSafe::new(emit)) };
         let mut v = Vec::new();
 
         for i in (1..15).rev() {
             let emit = Arc::clone(&emitter);
             let clos = move || {
                 emit.0.emit(&2, i * 2);
-                emit.0.emit(&1, 2);
+                emit.emit(&1, 2);
             };
             v.push(thread::spawn(clos));
         }
@@ -68,7 +68,7 @@ use std::num::Wrapping;
 use std::os::raw::{c_char, c_int, c_ulong};
 mod ccompat;
 mod threadpool;
-use ccompat::carray::CArray;
+use ccompat::{carray::CArray, ThreadSafe};
 use global_emit::GlobalEmit;
 use lazy_static::lazy_static;
 use threadpool::{ReducePool, ThreadPool};
@@ -227,6 +227,17 @@ mod global_emit {
                 .for_each(|k| v.push(k));
             v
         }
+
+        /// If the map is empty
+        fn no_values(&self) -> bool {
+            let map: &DashMap<K, _> = &*self.internal.read().unwrap();
+            for heap in map.iter() {
+                if !(*heap).is_empty() {
+                    return false;
+                }
+            }
+            true
+        }
     }
 
     /// Encapsulates mutable global threadsafe state for a map between keys and
@@ -328,6 +339,19 @@ mod global_emit {
             v.sort();
             v.into_iter().map(|k| k.0)
         }
+
+        /// Returns if there are any values in the emitter.
+        ///
+        /// Note that if values are inserted while `empty` is checking, the
+        /// result may be inconsistant.
+        pub fn is_empty(&self) -> bool {
+            for part in &*self.internal {
+                if !part.no_values() {
+                    return false;
+                }
+            }
+            return true;
+        }
     }
 }
 
@@ -357,14 +381,10 @@ pub extern "C" fn MR_Emit(key: *const c_char, value: *const c_char) {
     EMITTED.emit(skey, svalue)
 }
 
-type Mapper = extern "C" fn(*const c_char);
+type Mapper = extern "C" fn(ThreadSafe<*const c_char>);
 type Reducer = extern "C" fn(*const c_char, *const Getter, c_int);
 type Getter = extern "C" fn(*const c_char, c_int) -> *const c_char;
 type Partitioner = extern "C" fn(*const c_char, c_int) -> c_ulong;
-
-struct ThreadSafe<T>(T);
-unsafe impl<T> std::marker::Sync for ThreadSafe<T> {}
-unsafe impl<T> std::marker::Send for ThreadSafe<T> {}
 
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
@@ -434,17 +454,19 @@ pub extern "C" fn MR_Run(
     let mappers = ThreadPool::new(num_mappers as usize).unwrap();
     let file_names = CArray::from(argv);
     for name in file_names.iter_to(argc as usize).skip(1) {
-        let file_ptr = ThreadSafe(*name);
-        mappers.execute(move || map(file_ptr.0));
+        let file_ptr = unsafe { ThreadSafe::new(*name) };
+        mappers.execute(move || map(file_ptr));
     }
     mappers.join(); // Join all threads
 
-    // Where ReducePool is a threadpool that will run reducer(key, getter, partition(key))
-    let mut reduce_pool = ReducePool::new();
-    for (i, keys) in (0..num_reducers).map(|i| (i, EMITTED.keys(i as usize))) {
-        reduce_pool.execute(keys.map(move |k| move || reduce(k.as_ptr(), getter as _, i)));
+    while !EMITTED.is_empty() {
+        // Run one cycle of reduce computation.
+        let mut reduce_pool = ReducePool::new();
+        for (i, keys) in (0..num_reducers).map(|i| (i, EMITTED.keys(i as usize))) {
+            reduce_pool.execute(keys.map(move |k| move || reduce(k.as_ptr(), getter as _, i)));
+        }
+        reduce_pool.join();
     }
-    reduce_pool.join();
 }
 
 #[no_mangle]

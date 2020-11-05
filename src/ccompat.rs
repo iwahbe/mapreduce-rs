@@ -66,3 +66,28 @@ pub mod carray {
         }
     }
 }
+
+/// An unsafe wrapper around an object to allow it to go between threads.
+#[repr(transparent)]
+pub struct ThreadSafe<T>(T);
+impl<T> ThreadSafe<T> {
+    pub unsafe fn new(t: T) -> Self {
+        ThreadSafe(t)
+    }
+}
+
+impl<T> std::ops::Deref for ThreadSafe<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for ThreadSafe<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+unsafe impl<T> std::marker::Sync for ThreadSafe<T> {}
+unsafe impl<T> std::marker::Send for ThreadSafe<T> {}
