@@ -44,7 +44,7 @@ mod tests {
         for i in (1..15).rev() {
             let emit = Arc::clone(&emitter);
             let clos = move || {
-                emit.0.emit(&2, i * 2);
+                emit.emit(&2, i * 2);
                 emit.emit(&1, 2);
             };
             v.push(thread::spawn(clos));
@@ -53,7 +53,7 @@ mod tests {
         // Must join for consistant tests
         v.into_iter().for_each(|t| t.join().unwrap());
 
-        let emit = &emitter.0;
+        let emit = &*emitter;
         for i in 1..15 {
             assert_eq!(emit.get(&1, 1), Some(2));
             assert_eq!(emit.get(&2, 2), Some(i * 2));
