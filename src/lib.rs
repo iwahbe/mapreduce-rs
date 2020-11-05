@@ -8,9 +8,56 @@
 
 #[cfg(test)]
 mod tests {
+
+    #[allow(unused_imports)]
+    use super::*;
+
+    extern "C" fn dummy_partition(partition: usize, _: c_int) -> c_ulong {
+        partition as c_ulong
+    }
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_emit_single_thread() {
+        let emitter = GlobalEmit::new(dummy_partition, &|x| *x);
+        emitter.setup(dummy_partition, 5);
+
+        emitter.emit(&1, 2);
+        emitter.emit(&1, 3);
+        emitter.emit(&1, 1);
+
+        assert_eq!(emitter.get(&1, 1), Some(1));
+        assert_eq!(emitter.get(&1, 1), Some(2));
+        assert_eq!(emitter.get(&1, 1), Some(3));
+    }
+
+    #[test]
+    fn test_emit_multi_threaded() {
+        use std::sync::Arc;
+        use std::thread;
+        let clos: &'static (dyn Send + Fn(&usize) -> usize) = &|x| *x;
+        let emit = GlobalEmit::new(dummy_partition, clos);
+
+        emit.setup(dummy_partition, 3);
+        let emitter = Arc::new(ThreadSafe(emit));
+        let mut v = Vec::new();
+
+        for i in (1..15).rev() {
+            let emit = Arc::clone(&emitter);
+            let clos = move || {
+                emit.0.emit(&2, i * 2);
+                emit.0.emit(&1, 2);
+            };
+            v.push(thread::spawn(clos));
+        }
+
+        // Must join for consistant tests
+        v.into_iter().for_each(|t| t.join().unwrap());
+
+        let emit = &emitter.0;
+        for i in 1..15 {
+            assert_eq!(emit.get(&1, 1), Some(2));
+            assert_eq!(emit.get(&2, 2), Some(i * 2));
+        }
     }
 }
 
@@ -33,7 +80,7 @@ mod global_emit {
     use std::collections::BinaryHeap;
     use std::os::raw::{c_int, c_ulong};
     use std::sync::{Mutex, MutexGuard, RwLock};
-    use std::{cmp::Eq, hash::Hash};
+    use std::{cmp::Eq, cmp::Reverse, hash::Hash};
 
     /// A Mutex protected value that can then be stabalized, yielding the the
     /// inner value. This is a useful construct almost exclusivly when statically
@@ -110,7 +157,7 @@ mod global_emit {
         Q: Hash + Eq + ?Sized + ToOwned<Owned = K>,
         K: Eq + Hash + Borrow<Q>,
     {
-        internal: RwLock<DashMap<K, BinaryHeap<V>>>,
+        internal: RwLock<DashMap<K, BinaryHeap<Reverse<V>>>>,
         q_bound: std::marker::PhantomData<Q>,
     }
 
@@ -134,8 +181,8 @@ mod global_emit {
             let map_read = self.internal.read().unwrap(); // Allows inserting into a
                                                           // binary heap, but not creating a new heap.
             let alter_push = |map: &DashMap<K, _>, key, value| {
-                map.alter(key, |_, mut v: BinaryHeap<V>| {
-                    v.push(value);
+                map.alter(key, |_, mut v: BinaryHeap<_>| {
+                    v.push(Reverse(value));
                     v
                 })
             };
@@ -152,7 +199,7 @@ mod global_emit {
                     // Otherwise we write a new heap, adding our element to
                     // that, and then insert the new heap.
                     let mut b = BinaryHeap::new();
-                    b.push(value);
+                    b.push(Reverse(value));
                     map_write.insert(key.to_owned(), b);
                 }
                 // map_write drops
@@ -167,7 +214,7 @@ mod global_emit {
                 .read()
                 .unwrap()
                 .get_mut(key)
-                .map(|mut m| m.pop())
+                .map(|mut m| m.pop().map(|v| v.0))
                 .unwrap_or(None)
         }
 
@@ -277,9 +324,9 @@ mod global_emit {
         /// Example asumes `K: Debug`.
         pub fn keys(&self, partition: usize) -> impl Iterator<Item = K> {
             let part = &self.internal[partition];
-            let mut v = part.keys();
+            let mut v: Vec<_> = part.keys().into_iter().map(|k| Reverse(k)).collect();
             v.sort();
-            v.into_iter()
+            v.into_iter().map(|k| k.0)
         }
     }
 }

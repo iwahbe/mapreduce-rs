@@ -1,5 +1,9 @@
 # Map Reduce
 
+## Installation Instructions
+
+This map reduce project was written in the Rust programming language. To install, build and test it, simply clone this repository onto your machine and run the command ```make test```. This will run the tests written in the make file, as well as the tests internal to the rust library we have written. 
+
 In 2004, engineers at Google introduced a new paradigm for large-scale
 parallel data processing known as MapReduce (see the original paper
 [here](https://static.googleusercontent.com/media/research.google.com/en//archive/mapreduce-osdi04.pdf),
