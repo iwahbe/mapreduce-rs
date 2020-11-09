@@ -16,6 +16,33 @@ mod tests {
         partition as c_ulong
     }
 
+    fn c_str(string: &str) -> CString {
+        let mut b = Vec::from(string.clone().as_bytes());
+        b.push(b'\0');
+        CString::from(CStr::from_bytes_with_nul(&b).unwrap())
+    }
+
+    #[test]
+    fn test_cstr_order() {
+        let emitter: GlobalEmit<CString, CString, CStr, _> =
+            GlobalEmit::new(dummy_partition, &|_| 0);
+        emitter.setup(dummy_partition, 1);
+
+        let k1 = c_str("aaa");
+        let v1 = c_str("vvv");
+        let k2 = c_str("bbb");
+        let v2 = c_str("www");
+        emitter.emit(&k2, v1.clone());
+        emitter.emit(&k1, v2.clone());
+        emitter.emit(&k2, v2.clone());
+        emitter.emit(&k1, v1.clone());
+
+        assert_eq!(emitter.get(&k1, 0), Some(v1.clone()));
+        assert_eq!(emitter.get(&k1, 0), Some(v2.clone()));
+        assert_eq!(emitter.get(&k2, 0), Some(v1));
+        assert_eq!(emitter.get(&k2, 0), Some(v2));
+    }
+
     #[test]
     fn test_emit_single_thread() {
         let emitter = GlobalEmit::new(dummy_partition, &|x| *x);
