@@ -9,12 +9,11 @@
 #[cfg(test)]
 mod tests {
 
-    #[allow(unused_imports)]
-    use super::*;
-
     extern "C" fn dummy_partition(partition: usize, _: c_int) -> c_ulong {
         partition as c_ulong
     }
+    #[allow(unused_imports)]
+    use super::*;
 
     fn c_str(string: &str) -> CString {
         let mut b = Vec::from(string.clone().as_bytes());
@@ -24,8 +23,7 @@ mod tests {
 
     #[test]
     fn test_cstr_order() {
-        let emitter: GlobalEmit<CString, CString, CStr, _> =
-            GlobalEmit::new(dummy_partition, &|_| 0);
+        let emitter: GlobalEmit<CString, CString, CStr, _> = GlobalEmit::new(&|_| 0);
         emitter.setup(dummy_partition, 1);
 
         let k1 = c_str("aaa");
@@ -45,7 +43,7 @@ mod tests {
 
     #[test]
     fn test_emit_single_thread() {
-        let emitter = GlobalEmit::new(dummy_partition, &|x| *x);
+        let emitter = GlobalEmit::new(&|x| *x);
         emitter.setup(dummy_partition, 5);
 
         emitter.emit(&1, 2);
@@ -62,7 +60,7 @@ mod tests {
         use std::sync::Arc;
         use std::thread;
         let clos: &'static (dyn Send + Fn(&usize) -> usize) = &|x| *x;
-        let emit = GlobalEmit::new(dummy_partition, clos);
+        let emit = GlobalEmit::new(clos);
 
         emit.setup(dummy_partition, 3);
         let emitter = unsafe { Arc::new(ThreadSafe::new(emit)) };
@@ -299,6 +297,9 @@ mod global_emit {
         > std::marker::Sync for GlobalEmit<K, V, Q, P>
     {
     }
+    extern "C" fn dummy_partition<P>(_: P, _: c_int) -> c_ulong {
+        0
+    }
 
     impl<K, V, Q, P> GlobalEmit<K, V, Q, P>
     where
@@ -317,13 +318,10 @@ mod global_emit {
 
         /// Allocates an empty GlobalEmit structure with keys of type K and values
         /// of type V.
-        pub fn new(
-            partitioner: extern "C" fn(P, c_int) -> c_ulong,
-            mask: &'static dyn Fn(&Q) -> P,
-        ) -> GlobalEmit<K, V, Q, P> {
+        pub fn new(mask: &'static dyn Fn(&Q) -> P) -> GlobalEmit<K, V, Q, P> {
             GlobalEmit {
                 internal: StableMutex::new(Vec::new()),
-                partition: UnsafeCell::new(partitioner),
+                partition: UnsafeCell::new(dummy_partition),
                 pmask_key: mask,
             }
         }
@@ -387,7 +385,7 @@ lazy_static! {
     // mutex to change, and we should avoid a long term solution that hides
     // everything behind a mutex.
     static ref EMITTED: GlobalEmit<CString, CString, CStr, *const c_char> =
-        GlobalEmit::new(MR_DefaultHashPartition, &|cstr: &CStr| cstr.as_ptr());
+        GlobalEmit::new(&|cstr: &CStr| cstr.as_ptr());
 }
 
 #[allow(non_camel_case_types)]
